@@ -1,90 +1,86 @@
-import { reactive, ref, computed } from 'vue'
-import { contactRules } from '@/utils/validation'
-import { toLatinDigits } from '@/utils/contactLinks'
-import { submitContactRequest, ContactNotConfiguredError } from '@/utils/contactApi'
-import { serviceLabel } from '@/data/contact'
+import { reactive, ref } from 'vue'
+import { CONTACT_FIELDS, sanitizeContact, validateContact } from '@shared/contact.js'
+import { submitContactRequest, API_MESSAGES } from '@/utils/contactApi'
 
-const emptyForm = () => ({ fullName: '', company: '', phone: '', email: '', service: '', message: '', website: '' })
+export const SUCCESS_MESSAGE = 'تم إرسال طلبك بنجاح، سنتواصل معك قريباً.'
+
+const emptyForm = () => ({
+  fullName: '',
+  companyName: '',
+  phone: '',
+  email: '',
+  service: '',
+  message: '',
+  website: '', // honeypot — must stay empty
+})
+
+// Phone and email share the "at least one of them" rule, so they are validated together.
+const linkedFields = (field) => (field === 'phone' || field === 'email' ? ['phone', 'email'] : [field])
 
 /**
- * Contact form state, validation and submission.
- * status: 'idle' | 'submitting' | 'success' | 'error' | 'unconfigured'
+ * Contact form state, validation (same rules as the API) and submission.
+ * status: 'idle' | 'submitting' | 'success' | 'error'
  */
 export function useContactForm(initialService = '') {
   const form = reactive({ ...emptyForm(), service: initialService })
   const errors = reactive({})
   const touched = reactive({})
   const status = ref('idle')
+  const feedback = ref('')
 
-  const validateField = (field) => {
-    const rule = contactRules[field]
-    errors[field] = rule ? rule(form[field]) : ''
-    return !errors[field]
+  const currentErrors = () => validateContact(sanitizeContact(form))
+
+  function validateField(field) {
+    const all = currentErrors()
+    for (const name of linkedFields(field)) {
+      if (name === field || touched[name]) errors[name] = all[name] || ''
+    }
   }
 
-  const validateAll = () => Object.keys(contactRules).map(validateField).every(Boolean)
-
-  const onBlur = (field) => {
+  function onBlur(field) {
     touched[field] = true
     validateField(field)
   }
 
-  const onInput = (field) => {
-    if (touched[field]) validateField(field)
+  function onInput(field) {
+    // A new edit hides the previous success/error banner.
+    if (status.value === 'success' || status.value === 'error') status.value = 'idle'
+    if (touched[field] || errors[field]) validateField(field)
   }
 
-  /** Plain-text summary of the request (used for the WhatsApp / email fallback). */
-  const summary = computed(() =>
-    [
-      'طلب خدمة من موقع سينيفيو',
-      `الاسم: ${form.fullName.trim()}`,
-      form.company.trim() && `الشركة: ${form.company.trim()}`,
-      `الهاتف: ${toLatinDigits(form.phone).trim()}`,
-      `البريد: ${form.email.trim()}`,
-      `الخدمة: ${serviceLabel(form.service)}`,
-      `الرسالة: ${form.message.trim()}`,
-    ]
-      .filter(Boolean)
-      .join('\n'),
-  )
+  function clearForm() {
+    Object.assign(form, emptyForm())
+    for (const key of Object.keys(errors)) delete errors[key]
+    for (const key of Object.keys(touched)) delete touched[key]
+  }
 
   async function submit() {
-    Object.keys(contactRules).forEach((field) => (touched[field] = true))
-    if (!validateAll()) return false
+    if (status.value === 'submitting') return false
 
-    // Honeypot: bots fill the hidden "website" field; silently accept and drop.
-    if (form.website) {
-      status.value = 'success'
-      return true
+    const all = currentErrors()
+    for (const field of CONTACT_FIELDS) {
+      touched[field] = true
+      errors[field] = all[field] || ''
+    }
+    if (Object.keys(all).length) {
+      status.value = 'idle'
+      return false
     }
 
     status.value = 'submitting'
     try {
-      await submitContactRequest({
-        fullName: form.fullName.trim(),
-        company: form.company.trim(),
-        phone: toLatinDigits(form.phone).trim(),
-        email: form.email.trim(),
-        service: form.service,
-        serviceLabel: serviceLabel(form.service),
-        message: form.message.trim(),
-        source: 'cineview-website',
-        submittedAt: new Date().toISOString(),
-      })
+      const response = await submitContactRequest({ ...sanitizeContact(form), website: form.website })
+      clearForm()
+      feedback.value = response.message || SUCCESS_MESSAGE
       status.value = 'success'
       return true
     } catch (error) {
-      status.value = error instanceof ContactNotConfiguredError ? 'unconfigured' : 'error'
+      if (error.fieldErrors) Object.assign(errors, error.fieldErrors)
+      feedback.value = error.message || API_MESSAGES.server
+      status.value = 'error'
       return false
     }
   }
 
-  function reset() {
-    Object.assign(form, emptyForm())
-    Object.keys(errors).forEach((key) => delete errors[key])
-    Object.keys(touched).forEach((key) => delete touched[key])
-    status.value = 'idle'
-  }
-
-  return { form, errors, status, summary, onBlur, onInput, submit, reset }
+  return { form, errors, status, feedback, onBlur, onInput, submit }
 }

@@ -1,19 +1,17 @@
 <script setup>
-import { watch, computed } from 'vue'
+import { watch } from 'vue'
 import { useRoute } from 'vue-router'
-import { Send, ChevronDown, CircleCheck, LoaderCircle, Info, Mail, RotateCcw } from 'lucide-vue-next'
+import { Send, ChevronDown, CircleCheck, CircleAlert, LoaderCircle } from 'lucide-vue-next'
 import FormField from '@/components/ui/FormField.vue'
 import BaseButton from '@/components/ui/BaseButton.vue'
-import BrandIcon from '@/components/icons/BrandIcon.vue'
 import { serviceOptions } from '@/data/contact'
-import { company } from '@/data/company'
 import { useContactForm } from '@/composables/useContactForm'
-import { hasValue, whatsappLink, mailtoLink } from '@/utils/contactLinks'
+import { CONTACT_LIMITS } from '@shared/contact.js'
 
 const route = useRoute()
 const validService = (value) => (serviceOptions.some((o) => o.value === value) ? value : '')
 
-const { form, errors, status, summary, onBlur, onInput, submit, reset } = useContactForm(validService(route.query.service))
+const { form, errors, status, feedback, onBlur, onInput, submit } = useContactForm(validService(route.query.service))
 
 // Preselect the service when arriving from a "request demo" link (/?service=inventory#contact).
 watch(
@@ -22,14 +20,6 @@ watch(
     const service = validService(value)
     if (service) form.service = service
   },
-)
-
-// Fallback channels shown when no backend endpoint is configured yet.
-const fallbackWhatsapp = computed(() =>
-  hasValue(company.whatsapp) ? whatsappLink(company.whatsapp, summary.value) : '',
-)
-const fallbackEmail = computed(() =>
-  hasValue(company.email) ? mailtoLink(company.email, 'طلب خدمة من موقع سينيفيو', summary.value) : '',
 )
 
 const inputClass = (field) => [
@@ -49,22 +39,11 @@ async function onSubmit(event) {
 
 <template>
   <div class="rounded-3xl border border-navy-100 bg-white p-6 shadow-lift sm:p-8 lg:p-10">
-    <!-- Success -->
-    <div v-if="status === 'success'" class="py-10 text-center" role="status">
-      <span class="mx-auto flex size-16 items-center justify-center rounded-full bg-emerald-50 text-emerald-600">
-        <CircleCheck :size="32" aria-hidden="true" />
-      </span>
-      <h3 class="mt-6 text-2xl font-bold text-navy-950">تم استلام طلبك بنجاح</h3>
-      <p class="mx-auto mt-3 max-w-md leading-8 text-navy-600">شكراً لتواصلك مع سينيفيو. سيقوم فريقنا بمراجعة طلبك والتواصل معك.</p>
-      <BaseButton variant="outline" class="mt-8" @click="reset">
-        <RotateCcw :size="16" aria-hidden="true" />
-        إرسال طلب جديد
-      </BaseButton>
-    </div>
-
-    <form v-else novalidate aria-labelledby="contact-form-title" @submit.prevent="onSubmit">
+    <form novalidate aria-labelledby="contact-form-title" :aria-busy="status === 'submitting'" @submit.prevent="onSubmit">
       <h3 id="contact-form-title" class="text-xl font-bold text-navy-950">أرسل طلبك</h3>
-      <p class="mt-1.5 text-sm text-navy-500">الحقول المعلّمة بـ <span class="text-rose-600">*</span> مطلوبة.</p>
+      <p class="mt-1.5 text-sm leading-6 text-navy-500">
+        الحقول المعلّمة بـ <span class="text-rose-600">*</span> مطلوبة، ويكفي إدخال رقم الهاتف أو البريد الإلكتروني.
+      </p>
 
       <div class="mt-7 grid gap-5 sm:grid-cols-2">
         <FormField id="cf-name" v-slot="{ id, describedBy, invalid }" label="الاسم الكامل" required :error="errors.fullName">
@@ -74,7 +53,7 @@ async function onSubmit(event) {
             type="text"
             name="fullName"
             autocomplete="name"
-            maxlength="100"
+            :maxlength="CONTACT_LIMITS.fullName.max"
             :aria-invalid="invalid"
             :aria-describedby="describedBy"
             aria-required="true"
@@ -84,23 +63,23 @@ async function onSubmit(event) {
           />
         </FormField>
 
-        <FormField id="cf-company" v-slot="{ id, describedBy, invalid }" label="اسم الشركة" :error="errors.company">
+        <FormField id="cf-company" v-slot="{ id, describedBy, invalid }" label="اسم الشركة" optional :error="errors.companyName">
           <input
             :id="id"
-            v-model="form.company"
+            v-model="form.companyName"
             type="text"
-            name="company"
+            name="companyName"
             autocomplete="organization"
-            maxlength="120"
+            :maxlength="CONTACT_LIMITS.companyName.max"
             :aria-invalid="invalid"
             :aria-describedby="describedBy"
-            :class="[inputClass('company'), 'h-12']"
-            @blur="onBlur('company')"
-            @input="onInput('company')"
+            :class="[inputClass('companyName'), 'h-12']"
+            @blur="onBlur('companyName')"
+            @input="onInput('companyName')"
           />
         </FormField>
 
-        <FormField id="cf-phone" v-slot="{ id, describedBy, invalid }" label="رقم الهاتف" required :error="errors.phone">
+        <FormField id="cf-phone" v-slot="{ id, describedBy, invalid }" label="رقم الهاتف" :error="errors.phone">
           <input
             :id="id"
             v-model="form.phone"
@@ -109,18 +88,17 @@ async function onSubmit(event) {
             dir="ltr"
             inputmode="tel"
             autocomplete="tel"
-            maxlength="20"
+            :maxlength="CONTACT_LIMITS.phone.max"
             placeholder="+000 00 000 0000"
             :aria-invalid="invalid"
             :aria-describedby="describedBy"
-            aria-required="true"
             :class="[inputClass('phone'), 'h-12 text-right']"
             @blur="onBlur('phone')"
             @input="onInput('phone')"
           />
         </FormField>
 
-        <FormField id="cf-email" v-slot="{ id, describedBy, invalid }" label="البريد الإلكتروني" required :error="errors.email">
+        <FormField id="cf-email" v-slot="{ id, describedBy, invalid }" label="البريد الإلكتروني" :error="errors.email">
           <input
             :id="id"
             v-model="form.email"
@@ -128,11 +106,10 @@ async function onSubmit(event) {
             name="email"
             dir="ltr"
             autocomplete="email"
-            maxlength="120"
+            :maxlength="CONTACT_LIMITS.email.max"
             placeholder="name@company.com"
             :aria-invalid="invalid"
             :aria-describedby="describedBy"
-            aria-required="true"
             :class="[inputClass('email'), 'h-12 text-right']"
             @blur="onBlur('email')"
             @input="onInput('email')"
@@ -181,7 +158,7 @@ async function onSubmit(event) {
             v-model="form.message"
             name="message"
             rows="5"
-            maxlength="2000"
+            :maxlength="CONTACT_LIMITS.message.max"
             placeholder="أخبرنا باختصار عن مشروعك أو احتياجك..."
             :aria-invalid="invalid"
             :aria-describedby="describedBy"
@@ -199,43 +176,31 @@ async function onSubmit(event) {
         </div>
       </div>
 
-      <!-- Not configured: offer the configured channels instead -->
-      <div
-        v-if="status === 'unconfigured'"
-        class="mt-6 rounded-2xl border border-brand-200 bg-brand-50 p-5 text-sm leading-7 text-navy-800"
-        role="status"
-      >
-        <p class="flex items-start gap-2 font-semibold">
-          <Info :size="18" class="mt-1 shrink-0 text-brand-700" aria-hidden="true" />
-          <template v-if="fallbackWhatsapp || fallbackEmail">
-            الإرسال المباشر من الموقع غير مفعّل حالياً. يمكنك إرسال طلبك بنفس البيانات عبر:
-          </template>
-          <template v-else>الإرسال من الموقع غير متاح حالياً. يرجى المحاولة لاحقاً.</template>
+      <!-- Result (announced to screen readers) -->
+      <div aria-live="polite">
+        <p
+          v-if="status === 'success'"
+          class="mt-6 flex items-start gap-3 rounded-2xl border border-emerald-200 bg-emerald-50 p-4 text-sm leading-7 font-semibold text-emerald-800"
+          data-testid="contact-success"
+        >
+          <CircleCheck :size="20" class="mt-0.5 shrink-0 text-emerald-600" aria-hidden="true" />
+          {{ feedback }}
         </p>
-        <div v-if="fallbackWhatsapp || fallbackEmail" class="mt-4 flex flex-wrap gap-3">
-          <BaseButton v-if="fallbackWhatsapp" :href="fallbackWhatsapp" external variant="whatsapp" size="sm">
-            <BrandIcon name="whatsapp" :size="16" />
-            إرسال عبر واتساب
-          </BaseButton>
-          <BaseButton v-if="fallbackEmail" :href="fallbackEmail" variant="outline" size="sm">
-            <Mail :size="16" aria-hidden="true" />
-            إرسال عبر البريد
-          </BaseButton>
-        </div>
       </div>
-
       <p
         v-if="status === 'error'"
-        class="mt-6 rounded-2xl border border-rose-200 bg-rose-50 p-4 text-sm font-semibold text-rose-700"
+        class="mt-6 flex items-start gap-3 rounded-2xl border border-rose-200 bg-rose-50 p-4 text-sm leading-7 font-semibold text-rose-700"
         role="alert"
+        data-testid="contact-error"
       >
-        تعذّر إرسال الطلب. يرجى التحقق من الاتصال والمحاولة مرة أخرى.
+        <CircleAlert :size="20" class="mt-0.5 shrink-0" aria-hidden="true" />
+        {{ feedback }}
       </p>
 
       <BaseButton type="submit" size="lg" class="mt-7 w-full sm:w-auto" :disabled="status === 'submitting'">
         <LoaderCircle v-if="status === 'submitting'" :size="18" class="animate-spin" aria-hidden="true" />
         <Send v-else :size="18" class="rtl:-scale-x-100" aria-hidden="true" />
-        {{ status === 'submitting' ? 'جارٍ الإرسال...' : 'إرسال الطلب' }}
+        {{ status === 'submitting' ? 'جاري الإرسال...' : 'إرسال الطلب' }}
       </BaseButton>
     </form>
   </div>

@@ -1,9 +1,6 @@
-const ARABIC_DIGITS = /[٠-٩۰-۹]/g
+import { toLatinDigits } from '@shared/contact.js'
 
-/** Converts Arabic-Indic / Persian digits to Latin digits. */
-export function toLatinDigits(value = '') {
-  return String(value).replace(ARABIC_DIGITS, (d) => String(d.charCodeAt(0) % 16))
-}
+export { toLatinDigits }
 
 /** Keeps digits only (used for wa.me links). */
 export const digitsOnly = (value = '') => toLatinDigits(value).replace(/\D/g, '')

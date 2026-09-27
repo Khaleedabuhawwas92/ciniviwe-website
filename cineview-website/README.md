@@ -2,6 +2,7 @@
 
 Corporate website for **Cineview (سينيفيو)**, a software development & technology solutions company.
 Arabic-first (RTL), built with **Vue 3 + Vite + Tailwind CSS v4**, with Lucide icons.
+Contact requests are handled by a small **Node.js / Express / MongoDB** API in [`server/`](server/README.md).
 
 ---
 
@@ -12,12 +13,25 @@ Arabic-first (RTL), built with **Vue 3 + Vite + Tailwind CSS v4**, with Lucide i
 
 ## Install & run
 
+Website:
+
 ```bash
 npm install        # install dependencies
 npm run dev        # start the dev server  → http://localhost:5173
 npm run build      # production build      → ./dist
 npm run preview    # preview the production build locally
 ```
+
+Contact API (needed for the contact form; requires MongoDB):
+
+```bash
+npm run api:install                 # install API dependencies (server/)
+cp server/.env.example server/.env  # then set MONGO_URI (and SMTP_* for emails)
+npm run api:dev                     # API → http://localhost:4000
+npm run api:test                    # API test suite (uses a local cineview_test database)
+```
+
+During development, run `npm run dev` and `npm run api:dev` side by side. Vite forwards `/api` to `http://localhost:4000`, so no extra configuration is needed.
 
 ---
 
@@ -31,7 +45,7 @@ npm run preview    # preview the production build locally
 | Portfolio projects (أعمالنا) | `src/data/portfolio.js` |
 | "من نحن" points and "لماذا سينيفيو" advantages | `src/data/highlights.js` |
 | "كيف نعمل؟" steps | `src/data/process.js` |
-| Contact form service options | `src/data/contact.js` |
+| Contact form service options, field limits and validation rules (shared with the API) | `shared/contact.js` |
 | Navigation links | `src/data/navigation.js` |
 | Colors, fonts, shadows | `src/assets/styles/main.css` (`@theme` block) |
 | Default SEO title/description | `index.html` and `src/composables/useSeo.js` |
@@ -111,20 +125,22 @@ Copy `.env.example` to `.env`:
 | Variable | Purpose |
 | --- | --- |
 | `VITE_SITE_URL` | Public URL (e.g. `https://www.example.com`). Enables the canonical link, `og:url` and structured-data URL. |
-| `VITE_CONTACT_ENDPOINT` | URL that receives contact-form submissions as a JSON `POST`. |
+| `VITE_API_URL` | Base URL of the contact API (e.g. `https://api.example.com`). Leave empty when the API is served on the same domain under `/api`, and in local development. |
+
+Only public values go in `VITE_*` variables — they are embedded in the browser bundle. Database and SMTP settings live only in `server/.env`.
 
 ### Contact form
 
-- Validation runs entirely in the browser: required fields, email and phone format. Arabic-Indic digits are accepted.
-- Submission logic lives in `src/utils/contactApi.js`. When `VITE_CONTACT_ENDPOINT` is set, the form posts:
-
-```json
-{ "fullName": "", "company": "", "phone": "", "email": "", "service": "inventory",
-  "serviceLabel": "نظام إدارة مخزون", "message": "", "source": "cineview-website", "submittedAt": "ISO date" }
-```
-
-  This works with your own API or with services such as Formspree or Getform. A non-2xx response shows an error message.
-- **No endpoint configured:** the form still validates the input. It then offers to send the same request through WhatsApp or email, if those are set in `company.js`. If neither is set, it shows a "not available yet" message.
+- The form posts to `POST {VITE_API_URL}/api/contact` (`src/utils/contactApi.js`).
+- Each request is stored in MongoDB, and an email notification is sent when SMTP is configured. See [`server/README.md`](server/README.md).
+- Validation rules live in `shared/contact.js` and are used by **both** the browser and the API, so they always match:
+  - full name, service and message are required;
+  - at least one of phone or email is required;
+  - Arabic-Indic digits are accepted.
+- Form states:
+  - **submitting:** the button is disabled and shows `جاري الإرسال...`;
+  - **success:** the confirmation message is shown and the form is cleared;
+  - **error:** an Arabic error message is shown (validation, rate limit, server or network) and the entered data is kept.
 - A hidden honeypot field filters out basic spam bots.
 
 ---
@@ -136,7 +152,7 @@ Copy `.env.example` to `.env`:
 3. Vercel detects Vite automatically:
    - Build command: `npm run build`
    - Output directory: `dist`
-4. Under **Settings → Environment Variables**, add `VITE_SITE_URL` (and `VITE_CONTACT_ENDPOINT` once you have one).
+4. Under **Settings → Environment Variables**, add `VITE_SITE_URL` and `VITE_API_URL` (the public URL of the deployed API).
 5. Deploy.
 
 `vercel.json` is already included:
@@ -144,6 +160,8 @@ Copy `.env.example` to `.env`:
 - It sets long-term caching for hashed assets.
 
 Using the CLI instead: `npm i -g vercel && vercel --prod`.
+
+The contact API is a long-running Node server, so it is deployed separately. Options include Render, Railway, Fly.io or a VPS, with MongoDB Atlas for the database. See [`server/README.md`](server/README.md#deployment).
 
 ---
 
@@ -159,8 +177,11 @@ src/
   pages/                   HomePage, SolutionDetailsPage, NotFoundPage
   router/                  Routes + scroll behavior for section anchors
   composables/             Scroll spy, reveal-on-scroll, contact form, SEO, …
-  utils/                   Validation, contact links, API submission, structured data
+  utils/                   Contact links, API submission, scroll helpers, structured data
   data/                    All editable content and configuration
+shared/
+  contact.js               Contact rules shared by the website and the API
+server/                    Contact API (Express + MongoDB) — see server/README.md
 ```
 
 ## Notes

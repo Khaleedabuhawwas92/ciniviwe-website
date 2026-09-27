@@ -9,6 +9,7 @@ const props = defineProps({
   id: { type: String, required: true },
   label: { type: String, required: true },
   required: { type: Boolean, default: false },
+  optional: { type: Boolean, default: false },
   error: { type: String, default: '' },
   hint: { type: String, default: '' },
 })
@@ -22,7 +23,7 @@ const hintId = `${props.id}-hint`
     <label :for="id" class="mb-2 flex items-center gap-1 text-sm font-bold text-navy-800">
       {{ label }}
       <span v-if="required" class="text-rose-600" aria-hidden="true">*</span>
-      <span v-else class="text-xs font-medium text-navy-400">(اختياري)</span>
+      <span v-else-if="optional" class="text-xs font-medium text-navy-400">(اختياري)</span>
     </label>
     <slot :id="id" :describedBy="[error && errorId, hint && hintId].filter(Boolean).join(' ') || undefined" :invalid="!!error" />
     <p v-if="hint && !error" :id="hintId" class="mt-1.5 text-xs text-navy-500">{{ hint }}</p>
