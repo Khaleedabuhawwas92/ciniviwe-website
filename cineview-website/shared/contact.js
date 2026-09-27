@@ -18,6 +18,25 @@ export const SERVICE_VALUES = SERVICE_OPTIONS.map((option) => option.value)
 
 export const serviceLabel = (value) => SERVICE_OPTIONS.find((option) => option.value === value)?.label ?? ''
 
+/** Lifecycle of a contact request (managed by staff in the admin dashboard). */
+export const CONTACT_STATUSES = ['NEW', 'CONTACTED', 'IN_PROGRESS', 'CLOSED', 'SPAM']
+
+export const CONTACT_STATUS_LABELS = {
+  NEW: 'جديد',
+  CONTACTED: 'تم التواصل',
+  IN_PROGRESS: 'قيد المتابعة',
+  CLOSED: 'مغلق',
+  SPAM: 'مزعج',
+}
+
+/** Delivery state of the "new request" email notification. */
+export const NOTIFICATION_STATUS_LABELS = {
+  PENDING: 'قيد الإرسال',
+  SENT: 'تم الإرسال',
+  FAILED: 'فشل الإرسال',
+  SKIPPED: 'لم يُرسل',
+}
+
 export const CONTACT_LIMITS = {
   fullName: { min: 3, max: 100 },
   companyName: { max: 120 },

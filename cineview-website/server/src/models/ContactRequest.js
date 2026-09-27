@@ -1,9 +1,31 @@
 import mongoose from 'mongoose'
-import { CONTACT_LIMITS, SERVICE_VALUES } from '../../../shared/contact.js'
+import { CONTACT_LIMITS, CONTACT_STATUSES, SERVICE_VALUES } from '../../../shared/contact.js'
 
-export const CONTACT_STATUSES = ['NEW', 'CONTACTED', 'IN_PROGRESS', 'CLOSED', 'SPAM']
+export { CONTACT_STATUSES }
 export const CONTACT_SOURCES = ['WEBSITE']
 export const NOTIFICATION_STATUSES = ['PENDING', 'SENT', 'FAILED', 'SKIPPED']
+export const NOTE_MAX_LENGTH = 2000
+
+// Internal staff note. Only ever returned by authenticated admin endpoints.
+const noteSchema = new mongoose.Schema(
+  {
+    text: { type: String, required: true, trim: true, maxlength: NOTE_MAX_LENGTH },
+    adminUser: { type: mongoose.Schema.Types.ObjectId, ref: 'AdminUser', required: true },
+    createdAt: { type: Date, default: Date.now },
+  },
+  { _id: true },
+)
+
+// Append-only record of every status change.
+const statusChangeSchema = new mongoose.Schema(
+  {
+    fromStatus: { type: String, enum: CONTACT_STATUSES, required: true },
+    toStatus: { type: String, enum: CONTACT_STATUSES, required: true },
+    changedBy: { type: mongoose.Schema.Types.ObjectId, ref: 'AdminUser', required: true },
+    changedAt: { type: Date, default: Date.now },
+  },
+  { _id: false },
+)
 
 const contactRequestSchema = new mongoose.Schema(
   {
@@ -28,6 +50,10 @@ const contactRequestSchema = new mongoose.Schema(
       sentAt: { type: Date },
       error: { type: String, maxlength: 500 },
     },
+
+    // Staff-only data — excluded by default, loaded explicitly by admin detail queries.
+    notes: { type: [noteSchema], default: [], select: false },
+    statusHistory: { type: [statusChangeSchema], default: [], select: false },
   },
   {
     timestamps: true,
@@ -43,8 +69,9 @@ const contactRequestSchema = new mongoose.Schema(
   },
 )
 
-// Admin listing: newest first, optionally filtered by status.
+// Admin listing: newest first, optionally filtered by status / service.
 contactRequestSchema.index({ status: 1, createdAt: -1 })
+contactRequestSchema.index({ service: 1, createdAt: -1 })
 contactRequestSchema.index({ createdAt: -1 })
 
 export const ContactRequest = mongoose.models.ContactRequest || mongoose.model('ContactRequest', contactRequestSchema)

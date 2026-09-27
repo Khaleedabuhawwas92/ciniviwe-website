@@ -6,6 +6,15 @@ export function notFound(_req, res) {
 
 // eslint-disable-next-line no-unused-vars
 export function errorHandler(err, req, res, _next) {
+  // Expected errors thrown by services/middleware.
+  if (err.name === 'HttpError') {
+    return res.status(err.status).json({
+      success: false,
+      message: err.message,
+      ...(err.code && { code: err.code }),
+      ...(err.errors && { errors: err.errors }),
+    })
+  }
   // Malformed JSON / body too large (thrown by express.json()).
   if (err.type === 'entity.parse.failed') {
     return res.status(400).json({ success: false, message: 'صيغة البيانات المرسلة غير صحيحة.' })
@@ -15,6 +24,9 @@ export function errorHandler(err, req, res, _next) {
   }
   if (err.name === 'ValidationError') {
     return res.status(400).json({ success: false, message: 'يرجى مراجعة البيانات المدخلة.' })
+  }
+  if (err.code === 11000) {
+    return res.status(409).json({ success: false, message: 'القيمة مستخدمة بالفعل.' })
   }
 
   logger.error('Unhandled error', { path: req.path, method: req.method, error: err.message })

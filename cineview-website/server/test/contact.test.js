@@ -1,53 +1,20 @@
 import { test, before, after, beforeEach, describe } from 'node:test'
 import assert from 'node:assert/strict'
 import { createServer } from 'node:net'
-
-// Must be set before the app modules are loaded (they read it at import time).
-process.env.NODE_ENV = 'test'
+// helpers.js must be imported before any app module (it sets NODE_ENV=test).
+import {
+  createApp,
+  makeConfig,
+  setupDatabase,
+  teardownDatabase,
+  clearCollections,
+  validContact as validBody,
+  waitFor,
+} from './helpers.js'
 
 const { default: request } = await import('supertest')
 const { SMTPServer } = await import('smtp-server')
-const { default: mongoose } = await import('mongoose')
-const { loadConfig } = await import('../src/config/env.js')
-const { createApp } = await import('../src/app.js')
-const { connectDatabase, disconnectDatabase } = await import('../src/db/connect.js')
 const { ContactRequest } = await import('../src/models/ContactRequest.js')
-
-const MONGO_TEST_URI = process.env.MONGO_TEST_URI || 'mongodb://127.0.0.1:27017/cineview_test'
-const ADMIN_KEY = 'test-admin-key-0123456789-abcdefghijklmnop'
-
-const validBody = () => ({
-  fullName: 'أحمد محمد',
-  companyName: 'شركة الاختبار',
-  phone: '+٩٦٦ ٥٠ ١٢٣ ٤٥٦٧',
-  email: 'Ahmed@Example.com',
-  service: 'inventory',
-  message: 'نحتاج نظاماً لإدارة المخزون في ثلاثة فروع.',
-})
-
-/** Test configuration; overrides are merged on top. */
-function makeConfig(overrides = {}) {
-  const base = loadConfig()
-  return {
-    ...base,
-    corsOrigins: ['http://localhost:5173'],
-    rateLimit: { windowMs: 60_000, max: 1000 },
-    ipHashSecret: 'test-secret',
-    adminApiKey: '',
-    ...overrides,
-    mail: { ...base.mail, host: '', from: '', to: [], ...(overrides.mail || {}) },
-  }
-}
-
-async function waitFor(check, { timeout = 8000, interval = 50 } = {}) {
-  const start = Date.now()
-  for (;;) {
-    const result = await check()
-    if (result) return result
-    if (Date.now() - start > timeout) throw new Error('waitFor timed out')
-    await new Promise((r) => setTimeout(r, interval))
-  }
-}
 
 /** A port with nothing listening on it (used to simulate an unreachable SMTP server). */
 async function closedPort() {
@@ -58,20 +25,9 @@ async function closedPort() {
   return port
 }
 
-before(async () => {
-  await connectDatabase(MONGO_TEST_URI)
-  await mongoose.connection.dropDatabase()
-  await ContactRequest.init()
-})
-
-after(async () => {
-  await mongoose.connection.dropDatabase()
-  await disconnectDatabase()
-})
-
-beforeEach(async () => {
-  await ContactRequest.deleteMany({})
-})
+before(setupDatabase)
+after(teardownDatabase)
+beforeEach(clearCollections)
 
 describe('POST /api/contact', () => {
   test('A/G. valid submission is saved and returns the success message', async () => {
@@ -311,62 +267,5 @@ describe('security', () => {
     assert.equal(res.status, 200)
     assert.equal(res.headers['x-content-type-options'], 'nosniff')
     assert.equal(res.headers['x-powered-by'], undefined)
-  })
-
-  test('responses never include SMTP credentials or IP hashes', async () => {
-    const app = createApp(makeConfig({ adminApiKey: ADMIN_KEY }))
-    await request(app).post('/api/contact').send(validBody())
-    const res = await request(app).get('/api/admin/contact-requests').set('Authorization', `Bearer ${ADMIN_KEY}`)
-    const json = JSON.stringify(res.body)
-    assert.ok(!json.includes('ipHash'))
-    assert.ok(!json.includes('secret'))
-  })
-})
-
-describe('admin API', () => {
-  test('is disabled (404) without ADMIN_API_KEY and requires the key when enabled', async () => {
-    const disabled = createApp(makeConfig())
-    assert.equal((await request(disabled).get('/api/admin/contact-requests')).status, 404)
-
-    const app = createApp(makeConfig({ adminApiKey: ADMIN_KEY }))
-    assert.equal((await request(app).get('/api/admin/contact-requests')).status, 401)
-    assert.equal(
-      (await request(app).get('/api/admin/contact-requests').set('Authorization', 'Bearer wrong-key')).status,
-      401,
-    )
-  })
-
-  test('lists, filters, searches, reads and updates status', async () => {
-    const app = createApp(makeConfig({ adminApiKey: ADMIN_KEY }))
-    const auth = { Authorization: `Bearer ${ADMIN_KEY}` }
-    await request(app).post('/api/contact').send(validBody())
-    await request(app).post('/api/contact').send({ ...validBody(), fullName: 'خالد يوسف', companyName: 'مؤسسة النور', email: 'k@nour.sa' })
-
-    const list = await request(app).get('/api/admin/contact-requests').set(auth)
-    assert.equal(list.status, 200)
-    assert.equal(list.body.pagination.total, 2)
-    assert.equal(list.body.data[0].fullName, 'خالد يوسف', 'newest first')
-
-    const search = await request(app).get('/api/admin/contact-requests').query({ q: 'النور' }).set(auth)
-    assert.equal(search.body.data.length, 1)
-    const byEmail = await request(app).get('/api/admin/contact-requests').query({ q: 'k@nour' }).set(auth)
-    assert.equal(byEmail.body.data.length, 1)
-    const regexSafe = await request(app).get('/api/admin/contact-requests').query({ q: '.*' }).set(auth)
-    assert.equal(regexSafe.body.data.length, 0, 'search input is treated literally')
-
-    const id = search.body.data[0].id
-    const one = await request(app).get(`/api/admin/contact-requests/${id}`).set(auth)
-    assert.equal(one.body.data.companyName, 'مؤسسة النور')
-
-    const patched = await request(app).patch(`/api/admin/contact-requests/${id}`).set(auth).send({ status: 'contacted' })
-    assert.equal(patched.status, 200)
-    assert.equal(patched.body.data.status, 'CONTACTED')
-
-    const filtered = await request(app).get('/api/admin/contact-requests').query({ status: 'CONTACTED' }).set(auth)
-    assert.equal(filtered.body.data.length, 1)
-
-    assert.equal((await request(app).patch(`/api/admin/contact-requests/${id}`).set(auth).send({ status: 'DELETED' })).status, 400)
-    assert.equal((await request(app).get('/api/admin/contact-requests/not-an-id').set(auth)).status, 404)
-    assert.equal((await request(app).get('/api/admin/contact-requests').query({ status: 'BAD' }).set(auth)).status, 400)
   })
 })

@@ -5,7 +5,11 @@ import { fileURLToPath } from 'node:url'
 const envFile = fileURLToPath(new URL('../../.env', import.meta.url))
 if (existsSync(envFile) && process.env.NODE_ENV !== 'test') process.loadEnvFile(envFile)
 
-const str = (name, fallback = '') => (process.env[name] ?? fallback).trim()
+// An empty value ("KEY=") counts as unset, so documented defaults still apply.
+const str = (name, fallback = '') => {
+  const value = (process.env[name] ?? '').trim()
+  return value || String(fallback).trim()
+}
 const int = (name, fallback) => {
   const value = Number.parseInt(process.env[name] ?? '', 10)
   return Number.isFinite(value) ? value : fallback
@@ -20,20 +24,35 @@ const list = (name, fallback = '') =>
     .map((item) => item.trim().replace(/\/+$/, ''))
     .filter(Boolean)
 
+const UNIT_SECONDS = { s: 1, m: 60, h: 3600, d: 86_400 }
+/** Durations like "15m", "12h", "7d" (or plain seconds) → seconds. */
+const duration = (name, fallback) => {
+  const match = /^(\d+)\s*([smhd]?)$/i.exec(str(name, fallback)) || /^(\d+)\s*([smhd]?)$/i.exec(fallback)
+  return Number(match[1]) * UNIT_SECONDS[(match[2] || 's').toLowerCase()]
+}
+
 /** Reads configuration from environment variables. Called once at startup (and per test). */
 export function loadConfig() {
   const nodeEnv = str('NODE_ENV', 'development')
-  const adminApiKey = str('ADMIN_API_KEY')
+  const isProduction = nodeEnv === 'production'
+  const timezone = str('APP_TIMEZONE') || str('NOTIFICATION_TIMEZONE', 'Asia/Riyadh')
+  const jwtSecret = str('ADMIN_JWT_SECRET')
 
   return {
     nodeEnv,
-    isProduction: nodeEnv === 'production',
+    isProduction,
     port: int('PORT', 4000),
     mongoUri: str('MONGO_URI'),
-    // Comma-separated list of allowed browser origins, e.g. "https://cineview.com,https://www.cineview.com"
-    corsOrigins: list('CORS_ORIGINS', nodeEnv === 'production' ? '' : 'http://localhost:5173,http://localhost:4173'),
-    // Number of reverse proxies in front of the app (Vercel/Render/Nginx = 1). Needed for correct client IPs.
+    // Allowed browser origins (website + admin dashboard), comma-separated, e.g.
+    // "https://cineview.com,https://admin.cineview.com". Never "*": admin requests carry credentials.
+    corsOrigins: list(
+      'CORS_ORIGINS',
+      isProduction ? '' : 'http://localhost:5173,http://localhost:5174,http://localhost:4173,http://localhost:4174',
+    ),
+    // Number of reverse proxies in front of the app (Render/Nginx/Cloudflare = 1). Needed for correct client IPs.
     trustProxy: int('TRUST_PROXY', 0),
+    // Timezone used for "today / this month" statistics, date filters and email dates.
+    timezone,
 
     rateLimit: {
       windowMs: int('CONTACT_RATE_LIMIT_WINDOW_MINUTES', 15) * 60 * 1000,
@@ -43,9 +62,29 @@ export function loadConfig() {
     // Used to hash client IPs before storage (raw IPs are never saved).
     ipHashSecret: str('IP_HASH_SECRET'),
 
-    // Admin API is disabled unless a sufficiently long key is configured.
-    adminApiKey: adminApiKey.length >= 32 ? adminApiKey : '',
-    adminApiKeyTooShort: adminApiKey.length > 0 && adminApiKey.length < 32,
+    // The old static-key admin access was removed in favour of admin accounts.
+    adminApiKeyDeprecated: Boolean(str('ADMIN_API_KEY')),
+
+    auth: {
+      // Signs short-lived access tokens. Required in production (>= 32 chars).
+      jwtSecret,
+      accessTokenTtlSec: duration('ADMIN_ACCESS_EXPIRES', '15m'),
+      refreshTokenTtlSec: duration('ADMIN_REFRESH_EXPIRES', '7d'),
+      bcryptRounds: int('ADMIN_BCRYPT_ROUNDS', 12),
+      cookie: {
+        name: 'cv_admin_rt',
+        path: '/api/admin/auth',
+        secure: bool('ADMIN_COOKIE_SECURE', isProduction),
+        // 'strict' when the admin app and API share a site (admin.x.com + api.x.com);
+        // 'none' (requires secure) only if they live on different sites.
+        sameSite: str('ADMIN_COOKIE_SAMESITE', 'strict').toLowerCase(),
+        domain: str('ADMIN_COOKIE_DOMAIN') || undefined,
+      },
+      loginRateLimit: {
+        windowMs: int('ADMIN_LOGIN_RATE_LIMIT_WINDOW_MINUTES', 15) * 60 * 1000,
+        max: int('ADMIN_LOGIN_RATE_LIMIT_MAX', 10),
+      },
+    },
 
     mail: {
       to: list('CONTACT_NOTIFICATION_EMAIL'),
@@ -56,7 +95,7 @@ export function loadConfig() {
       user: str('SMTP_USER'),
       pass: process.env.SMTP_PASS ?? '',
       from: str('SMTP_FROM'),
-      timezone: str('NOTIFICATION_TIMEZONE', 'Asia/Riyadh'),
+      timezone,
     },
   }
 }

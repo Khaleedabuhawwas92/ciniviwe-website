@@ -3,6 +3,16 @@
 Corporate website for **Cineview (سينيفيو)**, a software development & technology solutions company.
 Arabic-first (RTL), built with **Vue 3 + Vite + Tailwind CSS v4**, with Lucide icons.
 Contact requests are handled by a small **Node.js / Express / MongoDB** API in [`server/`](server/README.md).
+Staff manage them in the **admin dashboard** in [`admin/`](admin/README.md), a separate Vue app on port 5174 with its own login.
+
+Quick start for the admin dashboard:
+
+```bash
+npm run api:install && npm run admin:install
+npm run admin:create      # first SUPER_ADMIN (once)
+npm run api:dev           # API → :4000
+npm run admin:dev         # dashboard → http://localhost:5174
+```
 
 ---
 
@@ -181,7 +191,8 @@ src/
   data/                    All editable content and configuration
 shared/
   contact.js               Contact rules shared by the website and the API
-server/                    Contact API (Express + MongoDB) — see server/README.md
+server/                    API: contact form + admin auth/endpoints (Express + MongoDB) — see server/README.md
+admin/                     Admin dashboard (Vue 3 + Pinia) — see admin/README.md
 ```
 
 ## Notes

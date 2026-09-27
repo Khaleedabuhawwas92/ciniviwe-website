@@ -1,5 +1,9 @@
 @import 'tailwindcss';
 
+/* The admin dashboard and API live in this folder too — keep their classes out of the website CSS. */
+@source not '../../../admin';
+@source not '../../../server';
+
 @theme {
   --font-sans: 'Cairo Variable', 'Cairo', 'Segoe UI', Tahoma, system-ui, sans-serif;
 
